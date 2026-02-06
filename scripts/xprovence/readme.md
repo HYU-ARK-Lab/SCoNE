@@ -19,6 +19,8 @@ _XProvence_ is a multilingual adaptation of Provence supporting 100+ languages. 
 }
 ```
 
+For the English-centric setting, see [Provence Github page](https://github.com/naver/bergen/tree/main/scripts/provence), e.g. English-centric evaluation runs, details on generating English training data etc.
+
 
 ### Our experimental data
 
