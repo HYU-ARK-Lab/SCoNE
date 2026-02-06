@@ -239,6 +239,7 @@ class RAG:
             doc_ids,
             multi_doc=True, 
             query_field="content",
+            gen_query_field="generated_query",
             oracle_provenance=self.oracle_provenance
             )
 
@@ -427,13 +428,14 @@ class RAG:
         )
         if not os.path.exists(process_context_file) or self.overwrite_exp or self.overwrite_index:
             processed_contexts, context_metrics = self.context_processor.eval(gen_dataset['doc'], 
-                                                                              gen_dataset['query'])
+                                                                              gen_dataset['generated_query'])
             os.makedirs(self.processed_context_folder, exist_ok=True)
             with open(process_context_file, 'w') as fp: 
                 json.dump({"processed_contexts": processed_contexts,
                            "context_metrics": context_metrics,
-                           "original_contexts": gen_dataset['doc'],
-                           "queries": gen_dataset['query']}, 
+                           "original_contexts": gen_dataset['doc'][:],
+                           "generated_queries": gen_dataset['generated_query'][:], 
+                           "queries": gen_dataset['query'][:]}, 
                           fp)
         else:
             with open(process_context_file, 'r') as fp: 
@@ -560,6 +562,8 @@ class RAG:
             query_ids, 
             doc_ids, 
             multi_doc=True, 
+            query_field="content",
+            gen_query_field="generated_query",
             )
 
         # context processing if needed
