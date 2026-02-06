@@ -7,7 +7,7 @@ This page contains code and experimental data for [XProvence: Zero-Cost Multilin
 
 _XProvence_ is a multilingual adaptation of Provence supporting 100+ languages. It is a lightweight __context pruning model__ for retrieval-augmented generation, particularly optimized for question answering. Given a user question and a retrieved passage, XProvence __removes sentences from the passage that are not relevant to the user question__. This __speeds up generation__ and __reduces context noise__, in a plug-and-play manner __for any LLM or retriever__. 
 
-![image/png](ill_xprovence.png)
+![https://github.com/naver/bergen/raw/refs/heads/main/scripts/xprovence/ill_xprovence.png](https://github.com/naver/bergen/blob/refs/heads/main/scripts/xprovence/ill_xpovence.png)
 
 ### Citation
 ```
