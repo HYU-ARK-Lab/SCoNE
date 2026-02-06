@@ -1,25 +1,28 @@
 # XProvence
 
-This page contains code and experimental data for [Zero-Cost Multilingual Context Pruning for Retrieval-augmented Generation
-]() (ECIR'26)
+This page contains code and experimental data for [XProvence: Zero-Cost Multilingual Context Pruning for Retrieval-augmented Generation
+](https://arxiv.org/pdf/2601.18886) (ECIR'26)
 
-[HF model](https://huggingface.co/naver/xprovence-reranker-bgem3-v2) | [paper]() 
+[HF model](https://huggingface.co/naver/xprovence-reranker-bgem3-v2) | [paper](https://arxiv.org/pdf/2601.18886) 
 
 _XProvence_ is a multilingual adaptation of Provence supporting 100+ languages. It is a lightweight __context pruning model__ for retrieval-augmented generation, particularly optimized for question answering. Given a user question and a retrieved passage, XProvence __removes sentences from the passage that are not relevant to the user question__. This __speeds up generation__ and __reduces context noise__, in a plug-and-play manner __for any LLM or retriever__. 
 
-![image/png]()
+![image/png](ill_xprovence.png)
 
 ### Citation
 ```
-@inproceedings{
-
+@inproceedings{xprovence,
+  title={XProvence: Zero-Cost Multilingual Context Pruning for Retrieval-augmented Generation},
+  author={Youssef Mohamed and Mohamed Elhoseiny and Thibault Formal and Nadezhda Chirkova},
+  booktitle={European Conference on Information Retrieval},
+  year={2026},
 }
 ```
 
 
 ### Our experimental data
 
-Zip archive with our experimental data is available at this [Google drive link](https://drive.google.com/file/d/1MT6WUqFLpPFPdE1_fSMr33KAi0VSMTTi/)
+Zip archive with our experimental data (evaluation runs) is available at this [Google drive link](https://drive.google.com/file/d/1MT6WUqFLpPFPdE1_fSMr33KAi0VSMTTi/)
 
 Each subfolder contains:
 *  `eval_dev_metrics.json`: reports various metrics (exact match, match, recall, LLMEval etc) for each run
@@ -62,7 +65,7 @@ python -u bergen.py generator=aya-expanse-8b retriever=oracle_provenance  +conte
 
 Training consists of three steps: (1) Translating Provence data; (2) Relevance scores calculation; (3) training XProvence model. We also provide below the [translated data](https://drive.google.com/file/d/1i1Qr_ogdS1R7G4At2iIfAuXOmmjlaIMA/) obtained after steps 1 and the [relevance scores](https://drive.google.com/file/d/1XHtN-xVx5kgH5b-O1bQc7FbxB1K3Fgu2/) obtained from step 2 so that you can jump directly to step 3.
 
-If you have any questions, do not hesitate to contact us by corresponding emails specified in the [paper]()!
+If you have any questions, do not hesitate to contact us by corresponding emails specified in the [paper](https://arxiv.org/pdf/2601.18886))!
 
 #### Step 1: Data Translation
 
