@@ -1,0 +1,8 @@
+init_args: 
+    _target_: models.generators.llm_pisco.LLMPISCO
+    model_name: null
+    batch_size: 64
+    compressor_max_length: 128
+    decoder_max_length: 1280
+    max_new_tokens: 128
+    
