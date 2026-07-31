@@ -1,5 +1,33 @@
 <img src="documentation/images/BERGEN.png" width="500">
 
+# SCoNE: Selecting Context-aware Neurons for RAG
+
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+SCoNE identifies and reweights the neurons that a language model relies on to actually use retrieved context (as opposed to falling back on parametric memory), improving context-faithfulness in RAG. It is implemented on top of [NAVER's BERGEN](https://github.com/naver/bergen) benchmarking library, and includes an [IRCAN](https://github.com/danshi777/IRCAN) (Shi et al., NeurIPS 2024) baseline for comparison. This repository is a derivative of BERGEN and is released under the same CC BY-NC-SA 4.0 license (see [License](#license)).
+
+## SCoNE Quick Start
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python bergen.py \
+    generator=qwen-25-7b-instruct \
+    dataset=kilt_hotpotqa \
+    retriever=splade-v3 \
+    generator.init_args.use_attr=true \
+    generator.init_args.attr_ds_name=hotpotqa \
+    generator.init_args.num_attr_samples=100 \
+    experiment_mode=scone \
+    enhance_strength=7.0 \
+    save_result=true \
+    top_k=15
+```
+
+- `experiment_mode=ircan` runs the IRCAN baseline; `experiment_mode=scone` runs SCoNE (ours). Ablations are available as `scone_attronly`, `scone_varonly`, `scone_var`, `scone_std`, `scone_mad`, `scone_w1`/`w2`/`w5`/`w10`.
+- `generator.init_args.use_attr=true` + `attr_ds_name=<name>` selects which HuggingFace dataset (see `DS_NAME_MAP` in `models/generators/generator.py`) is used to mine context-aware neurons; `num_attr_samples` controls how many samples are used.
+- Baseline generator configs for CAD, RankCoT, Ret-Robust and PA-RAG are also included under `config/generator/` for comparison.
+
+---
+
 # BERGEN: A Benchmarking Library for Retrieval-Augmented Generation
  
 [![arXiv](https://img.shields.io/badge/arXiv-2407.01102-b31b1b.svg)](https://arxiv.org/abs/2407.01102)
@@ -100,9 +128,17 @@ To add new datasets and models, or configure prompts, see our [reference guide](
 
 ## Cite
 
-If you use BERGEN for your research, please consider citing:
+If you use SCoNE, please cite our paper (citation coming soon). This repository builds on BERGEN and includes the IRCAN baseline — if you use those, please also cite:
 
 ```bibtex
+@inproceedings{shi2024ircan,
+      title={IRCAN: Mitigating Knowledge Conflicts in LLM Generation via Identifying and Reweighting Context-Aware Neurons},
+      author={Dan Shi and Renren Jin and Tianhao Shen and Weilong Dong and Xinwei Wu and Deyi Xiong},
+      booktitle={Advances in Neural Information Processing Systems (NeurIPS)},
+      year={2024},
+      url={https://github.com/danshi777/IRCAN},
+}
+
 @misc{rau2024bergenbenchmarkinglibraryretrievalaugmented,
       title={BERGEN: A Benchmarking Library for Retrieval-Augmented Generation}, 
       author={David Rau and Hervé Déjean and Nadezhda Chirkova and Thibault Formal and
@@ -127,6 +163,6 @@ If you use BERGEN for your research, please consider citing:
 
 ## License
 
-BERGEN is released under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 license. For more details, see the [LICENSE](LICENSE) file.
+This repository is a derivative of [NAVER's BERGEN](https://github.com/naver/bergen), released under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 license, and SCoNE's additions are released under the same license. For more details, see the [LICENCE.md](LICENCE.md) and [NOTICE.md](NOTICE.md) files.
 
 ---
