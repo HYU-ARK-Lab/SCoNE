@@ -1,11 +1,9 @@
 init_args:
   _target_: models.generators.llm.LLM
-  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  model_name: "MignonMiyoung/RankCoT"
   max_new_tokens: 128
   max_length: 2048
   batch_size: 8
   use_attr: false
   use_cad: false
   no_context: false
-  attr_ds_name: null
-  num_attr_samples: 100

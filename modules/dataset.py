@@ -12,6 +12,7 @@ import random
 
 
 class Tokenized_Sorted_Dataset(Dataset):
+    # 입력 데이터를 토큰화하고, 토큰 길이에 따라 정렬하는 데이터셋
     """
     Custom PyTorch Dataset that tokenizes and sorts data based on token length.
 
@@ -30,11 +31,16 @@ class Tokenized_Sorted_Dataset(Dataset):
         processed_data = []
         for item in tqdm(data):
             formatted_instr, label_start_index = self.model.format_instruction(item, eval=not self.training)
+            # print(f"formatted_instr : {formatted_instr}, label_start_index : {label_start_index}")
+                  
             item['formatted_instruction'] = formatted_instr
             item['label_start_index'] = label_start_index
             tokenized_input = self.tokenizer(formatted_instr, truncation=True, return_tensors="pt")
             length = tokenized_input['input_ids'].size(1)  # Length of tokenized input
+            # print(f"tokenized_input: {tokenized_input}, length : {length}")
+
             processed_data.append((length, item, tokenized_input))
+            # print(f"processed_data : {processed_data}")
         
             # Sort by tokenized input length
         self.sorted_data = sorted(processed_data, key=lambda x: x[0])
@@ -48,7 +54,7 @@ class Tokenized_Sorted_Dataset(Dataset):
         item['tokenized_input'] = tokenized_input
         return item
 
-    def select(self, indices: list[int]):
+    def select(self, indices: list[int]): # 일부분만 가져옴.
         # Create a new dataset based on selected indices
         selected_data = [self.sorted_data[i] for i in indices]
         # Return a new instance of Tokenized_Sorted_Dataset with selected data

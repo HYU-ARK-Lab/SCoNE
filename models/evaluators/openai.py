@@ -9,6 +9,8 @@ from tqdm import tqdm
 import numpy as np
 import os
 import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def openai_api_calculate_cost(usage,model="gpt-4-1106-preview"):
@@ -32,13 +34,17 @@ def openai_api_calculate_cost(usage,model="gpt-4-1106-preview"):
         'gpt-4o': {
             'prompt': 0.005,  #US$5.00 / 1M tokens
             'completion': 0.015,  #US$15.00 / 1M tokens
-        }        
+        },
+        'gpt-5-mini': {
+            'prompt': 0.00025,   # $0.25/1M
+            'completion': 0.002, # $2.00/1M
+        },    
     }
 
     try:
         model_pricing = pricing[model]
     except KeyError:
-        raise ValueError("Invalid model specified")
+        return (0, 0, 0)
 
     prompt_cost = usage.prompt_tokens * model_pricing['prompt'] / 1000
     completion_cost = usage.completion_tokens * model_pricing['completion'] / 1000
@@ -53,14 +59,17 @@ def openai_api_calculate_cost(usage,model="gpt-4-1106-preview"):
     return (total_cost,prompt_cost,completion_cost)
 
 
-def run_llm(client, model_name,messages):
-    #model_name="gpt-3.5-turbo"
-    #model_name='gpt-4'
-    #model_name="gpt-4-0125-preview"
-    response = client.chat.completions.create( messages=messages, model=model_name)
-    cost = openai_api_calculate_cost(response.usage,model_name)
-    #print (cost)
-    return response.choices[0].message.content, cost
+def run_llm(client, model_name, messages, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(messages=messages, model=model_name)
+            cost = openai_api_calculate_cost(response.usage, model_name)
+            return response.choices[0].message.content, cost
+        except openai.RateLimitError as e:
+            wait = 2 ** attempt
+            print(f"Rate limit hit, retrying in {wait}s... ({e})")
+            time.sleep(wait)
+    raise RuntimeError(f"Failed after {max_retries} retries")
 
 
 
@@ -92,24 +101,36 @@ class OpenAI():
         self.client = openai.OpenAI(api_key = os.environ.get("OPENAI_API_KEY"),)
         self.model_name=model
         
-    def __call__(self, predictions, references, questions):
-        scores = list()
-        weird = list()
+    def __call__(self, predictions, references, questions, num_workers=8):
+        scores = [None] * len(questions)
+        weird = [None] * len(questions)
         total_cost = 0
         prompt_cost = 0
         completion_cost = 0
-        for q,r,p in (tq:= tqdm(zip(questions,references,predictions),total=len(questions),desc="score:  0.0%")):
-            prompt = create_instruction(q,r[0],p)
-            response, costs = run_llm(self.client,self.model_name,prompt)
-            total_cost += costs[0]
-            prompt_cost += costs[1]
-            completion_cost += costs[2]
-            score = 1 if "yes" in response.lower() else 0       
-            scores.append(score)
-            weird.extend([ 1 if ("no" not in response.lower() and "yes" not in response.lower()) else 0 ])
-            tq.set_description(f"cost:{total_cost:4.1f} score: {np.mean(scores)* 100:4.1f}% weird {np.mean(weird)* 100:4.1f}%")
-        print(total_cost,prompt_cost,completion_cost)
-        return np.mean(scores), scores, {"total_cost":total_cost,"prompt_cost":prompt_cost,"completion_cost":completion_cost}
+
+        def eval_one(idx, q, r, p):
+            prompt = create_instruction(q, r[0], p)
+            response, costs = run_llm(self.client, self.model_name, prompt)
+            score = 1 if "yes" in response.lower() else 0
+            w = 1 if ("no" not in response.lower() and "yes" not in response.lower()) else 0
+            return idx, score, w, costs
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(eval_one, i, q, r, p): i
+                       for i, (q, r, p) in enumerate(zip(questions, references, predictions))}
+            with tqdm(as_completed(futures), total=len(futures), desc="score:  0.0%") as tq:
+                for future in tq:
+                    idx, score, w, costs = future.result()
+                    scores[idx] = score
+                    weird[idx] = w
+                    total_cost += costs[0]
+                    prompt_cost += costs[1]
+                    completion_cost += costs[2]
+                    done = [s for s in scores if s is not None]
+                    tq.set_description(f"cost:{total_cost:4.1f} score: {np.mean(done)*100:4.1f}% weird: {np.mean([w for w in weird if w is not None])*100:4.1f}%")
+
+        print(total_cost, prompt_cost, completion_cost)
+        return np.mean(scores), scores, {"total_cost": total_cost, "prompt_cost": prompt_cost, "completion_cost": completion_cost}
     
     def pairwise_win_rate(self, predictions, opponent_predictions, references, questions):
         assert len(predictions) == len(opponent_predictions)

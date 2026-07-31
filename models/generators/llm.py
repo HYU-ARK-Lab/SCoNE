@@ -31,7 +31,15 @@ class LLM(Generator):
                 gguf_file: str = None,
                 attn_implementation: str = "flash_attention_2",
                 local_path: bool = False,
-                use_middle_truncation: bool = False
+                use_middle_truncation: bool = False,
+                use_attr=False,
+                use_cad=False,
+                no_context=False,
+                attr_ds_name=None,
+                num_attr_samples=100,
+                neuron_selection_mode='first',
+                random_seed=42,
+                neuron_json_path=None,
                 ):
         """
         :model_name: hf model name or path to a local checkpoint
@@ -47,28 +55,41 @@ class LLM(Generator):
                            max_doc_len=max_doc_len,
                            max_length=max_length,
                            use_middle_truncation=use_middle_truncation)
+        
         # check type of gpu: if not A100 then change attn implementation to sdpa
         if "A100" not in torch.cuda.get_device_name(torch.cuda.current_device):
             attn_implementation="sdpa"
             
         self.quantization = quantization
+        self.use_attr = use_attr
+        self.use_cad = use_cad
+        self.no_context = no_context
+        self.attr_ds_name = attr_ds_name
+        self.num_attr_samples = num_attr_samples
+        self.neuron_selection_mode = neuron_selection_mode
+        self.random_seed = random_seed
+        self.neuron_json_path = neuron_json_path
         
          # get tokenizer or lora adapter if it exists else use models' tokenizer
         if quantization == "no":
+            print("DEBUG: Using quantization == 'no' branch") 
             tokenizer_name = self.model_name
             model_class = AutoModelForCausalLM
         else:
+            # 여기 실행됨. 그때의 quantization 값은 None
+            print(f"DEBUG: Using quantization == '{quantization}' branch")
             try:
                 config = PeftConfig.from_pretrained(model_name)
                 tokenizer_name = config.base_model_name_or_path
                 model_class = AutoPeftModelForCausalLM
                 print(f"Found peft config for {model_name}")
             except:
+                # 여기 실행됨. 그 때의 model_name = meta-llama-3-8b-instruct
                 warnings.warn(f"Could not find PeftConfig for {model_name}. Using regular model.")
                 tokenizer_name = self.model_name
                 model_class = AutoModelForCausalLM
                 
-        print(f"Tokenizer used: {tokenizer_name}")
+        print(f"Tokenizer used: {tokenizer_name}") # tokenizer used: meta-llama-3-8b-instruct
         
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, 
@@ -92,6 +113,7 @@ class LLM(Generator):
         )
 
         if quantization == "int8":
+            print("DEBUG: Loading model with int8 quantization")
             quant_config = BitsAndBytesConfig(
                 llm_int8_enable_fp32_cpu_offload=True
             )
@@ -105,6 +127,7 @@ class LLM(Generator):
             )
 
         elif quantization == "int4":
+            print("DEBUG: Loading model with int4 quantization")
             quant_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type='nf4',
@@ -120,32 +143,111 @@ class LLM(Generator):
                 local_files_only=local_path,
             )
         else:
+            # 여기 부분 실행됨. Quantization 없이 실행됨.
+            print("DEBUG: Loading model without quantization (else branch)")
             self.model = model_class.from_pretrained(
                 self.model_name,
                 device_map='auto',
                 gguf_file=gguf_file,
             )
+        
+        print(f"DEBUG: Final model type: {type(self.model)}")
+        print(f"DEBUG: Model device: {self.model.device}")
 
         self.model = self.model.bfloat16()
         self.model.eval()
         self.model.config.pretraining_tp = 1
         self.prompt = prompt
 
-    def generate(self, instr_tokenized):
-        input_ids = instr_tokenized['input_ids'].to(self.model.device)
-        attention_mask = instr_tokenized['attention_mask'].to(self.model.device)
-        output_ids = self.model.generate(
-            input_ids,
-            attention_mask=attention_mask,
-            do_sample=False,
-            max_new_tokens=self.max_new_tokens,
-        )
+    def generate(self, instr_tokenized, wo_instr_tokenized=None, test_layer=None, test_neuron=None): # generator에서 사용하는 generate()
+        # print(f"[DEBUG] LLM.generate() - model id: {id(self.model)}")
+        # print(f"[DEBUG] LLM.generate() - model type: {type(self.model)}")
+        print(f"self.use_cad {self.use_cad}")
+        if not self.use_cad:
+            input_ids = instr_tokenized['input_ids'].to(self.model.device)
+            attention_mask = instr_tokenized['attention_mask'].to(self.model.device)
+            output_ids = self.model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                do_sample=False,
+                max_new_tokens=self.max_new_tokens,
+            )
 
-        prompt_len = instr_tokenized['input_ids'].size(1)
-        generated_ids = output_ids[:, prompt_len:]
-        decoded = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+            prompt_len = instr_tokenized['input_ids'].size(1)
+            generated_ids = output_ids[:, prompt_len:]
+            decoded = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+            print(f"[DEBUG] decoded {decoded}")
+            return decoded
+        else:
+            w_input_ids = instr_tokenized['input_ids'].to(self.model.device)
+            w_attention_mask = instr_tokenized['attention_mask'].to(self.model.device)
+            wo_input_ids = wo_instr_tokenized['input_ids'].to(self.model.device)
+            wo_attention_mask = wo_instr_tokenized['attention_mask'].to(self.model.device)
 
-        return decoded
+            max_length = self.max_new_tokens
+            cur_len = 0
+            cad_alpha = 0.5
+            batch_size = w_input_ids.size(0)
+
+            unfinished_sents = w_input_ids.new(batch_size).fill_(1)
+            sent_lengths = w_input_ids.new(batch_size).fill_(max_length)
+            generated_tokens = [[] for _ in range(batch_size)]
+
+            # Initial forward pass — get first logits and seed KV caches
+            wo_out = self.model(input_ids=wo_input_ids, attention_mask=wo_attention_mask, use_cache=True)
+            wo_logits = wo_out.logits[:, -1, :].clone()
+            past_kv_wo = wo_out.past_key_values
+            del wo_out
+
+            w_out = self.model(input_ids=w_input_ids, attention_mask=w_attention_mask, use_cache=True)
+            w_logits = w_out.logits[:, -1, :].clone()
+            past_kv_w = w_out.past_key_values
+            del w_out
+
+            while cur_len < max_length:
+                logits = (1 + cad_alpha) * w_logits - cad_alpha * wo_logits
+                next_token = torch.argmax(logits, dim=-1)
+
+                if self.tokenizer.eos_token_id is not None and self.tokenizer.pad_token_id is not None:
+                    tokens_to_add = next_token * unfinished_sents + (self.tokenizer.pad_token_id) * (1 - unfinished_sents)
+                else:
+                    tokens_to_add = next_token
+
+                # Extend attention masks before updating unfinished_sents (EOS token itself gets mask=1)
+                w_attention_mask = torch.cat([w_attention_mask, unfinished_sents.unsqueeze(-1)], dim=-1)
+                wo_attention_mask = torch.cat([wo_attention_mask, unfinished_sents.unsqueeze(-1)], dim=-1)
+
+                cur_len += 1
+
+                for i, token in enumerate(tokens_to_add.tolist()):
+                    if unfinished_sents[i] == 1:
+                        generated_tokens[i].append(token)
+
+                if self.tokenizer.eos_token_id is not None:
+                    eos_in_sents = tokens_to_add == self.tokenizer.eos_token_id
+                    is_sents_unfinished_and_token_to_add_is_eos = unfinished_sents.mul(eos_in_sents.long()).bool()
+                    sent_lengths.masked_fill_(is_sents_unfinished_and_token_to_add_is_eos, cur_len)
+                    unfinished_sents.mul_((~eos_in_sents).long())
+
+                if unfinished_sents.max() == 0:
+                    break
+
+                # Incremental forward pass with KV cache — only feed the new token
+                new_token_ids = tokens_to_add.unsqueeze(-1)  # (batch, 1)
+
+                wo_out = self.model(input_ids=new_token_ids, attention_mask=wo_attention_mask, past_key_values=past_kv_wo, use_cache=True)
+                wo_logits = wo_out.logits[:, -1, :].clone()
+                past_kv_wo = wo_out.past_key_values
+                del wo_out
+
+                w_out = self.model(input_ids=new_token_ids, attention_mask=w_attention_mask, past_key_values=past_kv_w, use_cache=True)
+                w_logits = w_out.logits[:, -1, :].clone()
+                past_kv_w = w_out.past_key_values
+                del w_out
+
+            full_prediction = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+            return full_prediction
+
         
     def __del__(self):
         gc.collect()

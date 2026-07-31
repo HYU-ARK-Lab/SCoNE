@@ -76,8 +76,13 @@ class RAG:
         prompt (str): Prompt config name
     """
 
-    def __init__(self, 
-                generator=None, 
+    def __init__(self,
+                enhance_strength=None,
+                top_k=None,
+                top_n=None,
+                experiment_mode=None,
+                save_result=False,
+                generator=None,
                 retriever=None, 
                 reranker=None,
                 query_generator=None, 
@@ -132,7 +137,20 @@ class RAG:
 
         if query_generator_config is None:
             query_generator_config = {"init_args": {"_target_": "models.query_generators.copy.CopyQuery"}}
-        
+        if experiment_mode is None:
+            experiment_mode = config.experiment_mode if hasattr(config, 'experiment_mode') else None
+        if enhance_strength is None:
+            enhance_strength = config.enhance_strength if hasattr(config, 'enhance_strength') else None
+        if top_k is None:
+            top_k = config.top_k if hasattr(config, 'top_k') else None
+        if top_n is None:
+            top_n = config.top_n if hasattr(config, 'top_n') else 50
+
+        self.experiment_mode = experiment_mode
+        self.enhance_strength = enhance_strength
+        self.top_k = top_k
+        self.top_n = top_n
+        self.save_result = save_result
         self.debug = debug
         self.dataset_folder = dataset_folder
         self.experiments_folder = experiments_folder
@@ -195,10 +213,10 @@ class RAG:
         print_rag_model(self, retriever_config, reranker_config, generator_config)
         
     def eval(self, dataset_split):
-
+        print(f"dataset_split: {dataset_split}")
         dataset = self.datasets[dataset_split]
-        query_dataset_name = self.datasets[dataset_split]['query'].name
-        doc_dataset_name = self.datasets[dataset_split]['doc'].name if "doc" in self.datasets[dataset_split] else None
+        query_dataset_name = getattr(self.datasets[dataset_split]['query'], 'name', dataset_split)
+        doc_dataset_name = getattr(self.datasets[dataset_split]['doc'], 'name', None)
 
         # query generation (or copying in case query_generator="copy")
         if self.retriever is not None:
@@ -208,9 +226,9 @@ class RAG:
                 dataset_split, 
             )
         
-        # retrieve
+        # retrieve : Relevance Score를 측정해보자. 
         if self.retriever is not None:
-            query_ids, doc_ids, _ = self.retrieve(
+            query_ids, doc_ids, scores = self.retrieve(
                     dataset, 
                     query_dataset_name, 
                     doc_dataset_name,
@@ -218,10 +236,10 @@ class RAG:
                     self.retrieve_top_k,
                     )  
         else:
-            query_ids, doc_ids = None, None
+            query_ids, doc_ids, scores = None, None, None
         # rerank
         if self.reranker is not None:
-            query_ids, doc_ids, _ = self.rerank(
+            query_ids, doc_ids, rerank_scores = self.rerank(
                 dataset, 
                 query_dataset_name, 
                 doc_dataset_name,
@@ -230,6 +248,7 @@ class RAG:
                 doc_ids,
                 self.rerank_top_k,
                 )
+            scores = rerank_scores
 
         doc_ids = [doc_ids_q[:self.generation_top_k] for doc_ids_q in doc_ids] if doc_ids != None else doc_ids 
 
@@ -237,9 +256,9 @@ class RAG:
             dataset, 
             query_ids, 
             doc_ids,
+            scores=scores, # scores 추가
             multi_doc=True, 
             query_field="content",
-            gen_query_field="generated_query",
             oracle_provenance=self.oracle_provenance
             )
 
@@ -327,6 +346,7 @@ class RAG:
                 retrieve_top_k,
                 overwrite_index=self.overwrite_index
                 )
+            
             query_ids, doc_ids, scores = out_ranking['q_id'], out_ranking['doc_id'], out_ranking['score']
             write_trec(ranking_file, query_ids, doc_ids, scores)
         else:             
@@ -428,14 +448,13 @@ class RAG:
         )
         if not os.path.exists(process_context_file) or self.overwrite_exp or self.overwrite_index:
             processed_contexts, context_metrics = self.context_processor.eval(gen_dataset['doc'], 
-                                                                              gen_dataset['generated_query'])
+                                                                              gen_dataset['query'])
             os.makedirs(self.processed_context_folder, exist_ok=True)
             with open(process_context_file, 'w') as fp: 
                 json.dump({"processed_contexts": processed_contexts,
                            "context_metrics": context_metrics,
-                           "original_contexts": gen_dataset['doc'][:],
-                           "generated_queries": gen_dataset['generated_query'][:], 
-                           "queries": gen_dataset['query'][:]}, 
+                           "original_contexts": gen_dataset['doc'],
+                           "queries": gen_dataset['query']}, 
                           fp)
         else:
             with open(process_context_file, 'r') as fp: 
@@ -453,8 +472,48 @@ class RAG:
                  gen_dataset, 
                  dataset_split, 
                  ):
+
         generation_start = time.time()
-        query_ids, questions, instructions, predictions, references, ranking_labels  = self.generator.eval(gen_dataset)
+        query_dataset_name = getattr(self.datasets[dataset_split]['query'], 'name', dataset_split)
+        doc_dataset_name = getattr(self.datasets[dataset_split]['doc'], 'name', None)
+
+        # Attr(뉴런 어트리뷰션)을 위해서 Test Dataset도 같이 포함시킨다.
+        use_attr = hasattr(self.generator, 'use_attr') and self.generator.use_attr
+        attr_ds_name = getattr(self.generator, 'attr_ds_name', None)
+        num_attr_samples = getattr(self.generator, 'num_attr_samples', 100)
+        neuron_selection_mode = getattr(self.generator, 'neuron_selection_mode', 'first')
+        random_seed = getattr(self.generator, 'random_seed', 42)
+        neuron_json_path = getattr(self.generator, 'neuron_json_path', None)
+
+        if use_attr and attr_ds_name is not None:
+            # BERGEN 파이프라인 없이 HF dataset에서 직접 attr 실행
+            print(f"[rag] attr_ds_name={attr_ds_name} 설정됨 → BERGEN train 파이프라인 스킵")
+            query_ids, questions, instructions, predictions, references, ranking_labels = \
+                self.generator.eval(
+                    eval_dataset=gen_dataset,
+                    experiment_mode=self.experiment_mode,
+                    train_dataset_name=None,
+                    enhance_strength=self.enhance_strength,
+                    top_k=self.top_k,
+                    top_n=self.top_n,
+                    save_result=self.save_result,
+                    attr_ds_name=attr_ds_name,
+                    num_attr_samples=num_attr_samples,
+                    neuron_selection_mode=neuron_selection_mode,
+                    random_seed=random_seed,
+                    neuron_json_path=neuron_json_path,
+                )
+        else:
+            # 기존 방식
+            query_ids, questions, instructions, predictions, references, ranking_labels = \
+                self.generator.eval(
+                    gen_dataset,
+                    train_dataset_name=query_dataset_name,
+                    save_result=self.save_result,
+                    retriever_name=self.retriever.get_clean_model_name() if self.retriever else "no_retriever",
+                    neuron_json_path=neuron_json_path,
+                )
+
         generation_time = time.time() - generation_start
         write_generated(
             self.experiment_folder,
@@ -491,6 +550,7 @@ class RAG:
 
         return questions, instructions, predictions, references
 
+    # 여기서 metric이 계산되고 있다. 
     def eval_metrics(self, dataset_split, questions, predictions, references):
         if predictions is None and references is None and questions is None:
             return
@@ -562,8 +622,6 @@ class RAG:
             query_ids, 
             doc_ids, 
             multi_doc=True, 
-            query_field="content",
-            gen_query_field="generated_query",
             )
 
         # context processing if needed

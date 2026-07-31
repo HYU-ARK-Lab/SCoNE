@@ -9,6 +9,8 @@ defaults:
     - train: null
     - prompt: basic
 
+# dataset_split: train
+
 # main variables locating the local data folder and index
 run_name: null
 dataset_folder: 'datasets/'
@@ -16,12 +18,20 @@ index_folder: 'indexes/'
 runs_folder: 'runs/'
 generated_query_folder: 'generated_queries/'
 processed_context_folder: 'processed_contexts/'
-experiments_folder: 'experiments/'   
+experiments_folder: 'experiments/'
 
 # topk documents to retrieve, rerank and to use for generation
 retrieve_top_k: 50
 rerank_top_k: 50
 generation_top_k: 5
+
+experiment_mode: None
+# 하이퍼 파라미터 추가
+enhance_strength: 5.0
+top_k: 50
+top_n: 50   # intersection cutoff (top-N attribution ∩ top-N variability); top_k = final #neurons kept
+
+save_result: false
 
 
 #

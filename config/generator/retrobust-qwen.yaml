@@ -1,0 +1,9 @@
+init_args:
+  _target_: models.generators.llm.LLM
+  model_name: "/path/to/retrobust-qwen/merged"  # local checkpoint path — replace with your own trained/merged Ret-Robust (Qwen) model
+  max_new_tokens: 128
+  max_length: 2048
+  batch_size: 4
+  use_attr: false
+  use_cad: false
+  no_context: false

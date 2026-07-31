@@ -26,4 +26,3 @@ test:
         init_args:
             _target_: modules.processors.qa_dataset_processor.SCIQ
             split: "test"
-

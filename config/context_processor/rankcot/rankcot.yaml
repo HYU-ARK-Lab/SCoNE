@@ -1,0 +1,8 @@
+init_args:
+  _target_: models.context_processors.rankcot.RankCoTProcessor
+  base_model_name: "meta-llama/Meta-Llama-3-8B-Instruct"
+  adapter_name: "MignonMiyoung/RankCoT"
+  batch_size: 4
+  max_passage_tokens: 1500
+  max_new_tokens: 512
+  top_k_passages: 5

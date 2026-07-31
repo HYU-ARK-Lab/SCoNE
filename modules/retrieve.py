@@ -55,7 +55,7 @@ class Retrieve:
         self.index(dataset, query_embeds_path, query_or_doc='query', overwrite_index=overwrite_index)
         self.index(dataset, doc_embeds_path, query_or_doc='doc', overwrite_index=overwrite_index)
 
-        doc_ids = dataset['doc']['id']
+        doc_ids = list(dataset['doc']['id'])
         q_ids = dataset['query']['id']
 
 
@@ -96,11 +96,10 @@ class Retrieve:
                
             scores_sorted_topk = torch.cat(scores_sorted_topk, dim=0)
             indices_sorted_topk = torch.cat(indices_sorted_topk, dim=0)
+
             
-
-
             # Use sorted top-k indices indices to retrieve corresponding document IDs
-            doc_ids = [[doc_ids[i] for i in q_idxs] for q_idxs in indices_sorted_topk]
+            doc_ids = [[doc_ids[i] for i in q_idxs] for q_idxs in indices_sorted_topk] # 원본
             return {
                 "score": scores_sorted_topk,
                 "q_id": q_ids,
