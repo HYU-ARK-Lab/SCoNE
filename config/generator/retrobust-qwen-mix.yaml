@@ -1,0 +1,9 @@
+init_args:
+  _target_: models.generators.llm.LLM
+  model_name: "/home1/irteam/chaewon-workspace/ret-robust/training/scripts/output_qwen_retrobust/merged"  # RetRobust mixture (nq_ret_robust.csv)
+  max_new_tokens: 128
+  max_length: 2048
+  batch_size: 4
+  use_attr: false
+  use_cad: false
+  no_context: false

@@ -315,10 +315,7 @@ class NeuronStrategies:
         safe_model_name = model_name.replace("/", "_") if model_name else None
         model_suffix = f"_{safe_model_name}" if safe_model_name else ""
         mode_tag = {'intersection': 'scone', 'attr_only': 'scone_attronly', 'var_only': 'scone_varonly'}[select_mode]
-        # [traversal-seed ablation] seed마다 결과 폴더가 겹쳐 덮어써지지 않도록 태그 추가.
-        _trav_seed = os.environ.get("TRAVERSAL_SEED")
-        _trav_suffix = f"_travseed{_trav_seed}" if _trav_seed is not None else ""
-        prefix = f"{train_dataset_name}{model_suffix}_{mode_tag}_top{top_k}_n{top_n}{_trav_suffix}"
+        prefix = f"{train_dataset_name}{model_suffix}_{mode_tag}_top{top_k}_n{top_n}"
 
         output_dir = Path("neuron_analysis_results") / prefix
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -393,7 +390,6 @@ class NeuronStrategies:
         #   'std' : sqrt(var)                     (L2, 원래 단위; ranking은 var와 동일)
         #   'mad' : (1/N) Σ_t |Attr_t - μ|         (L1, 이상치 강건)
         # 스칼라 1개를 전 step에 broadcast → 매 t마다 선택이 동일 (순서 완전 불변).
-        # 원본과 달리 TRAVERSAL_SEED 폴더 suffix는 두지 않는다 (순서 불변이라 불필요).
         all_var = {}
         for (layer, neuron), scores in all_neuron_stats.items():
             dataset_size = len(scores)

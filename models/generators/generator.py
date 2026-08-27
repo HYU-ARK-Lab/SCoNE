@@ -17,7 +17,6 @@ import random
 import numpy as np
 import torch.nn.functional as F
 from collections import Counter
-import os
 import hashlib
 import pickle
 from .neuron_strategies import NeuronStrategies
@@ -377,10 +376,6 @@ class Generator(ABC):
                     hf_sample_indices = list(range(max(0, total - n), total))
                 else:
                     hf_sample_indices = list(range(n))
-                # [traversal-seed ablation] 같은 100개를 그대로 두고 '가져온 순서'만 seed로 섞음.
-                _trav_seed = os.environ.get("TRAVERSAL_SEED")
-                if _trav_seed is not None:
-                    random.Random(int(_trav_seed)).shuffle(hf_sample_indices)
 
                 for i in tqdm(hf_sample_indices, desc='Building prompts from ds (Attr)'):
                     sample = train_ds[i]
