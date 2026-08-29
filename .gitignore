@@ -11,3 +11,6 @@ tests/run/
 outputs/
 results/
 wandb/
+selectivity_results/
+response_logs/
+neuron_analysis_results/

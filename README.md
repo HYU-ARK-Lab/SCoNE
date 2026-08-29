@@ -1,16 +1,40 @@
-<img src="documentation/images/BERGEN.png" width="500">
-
 # SCoNE: Selecting Context-aware Neurons for RAG
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
-SCoNE identifies and reweights the neurons that a language model relies on to actually use retrieved context (as opposed to falling back on parametric memory), improving context-faithfulness in RAG. It is implemented on top of [NAVER's BERGEN](https://github.com/naver/bergen) benchmarking library, and includes an [IRCAN](https://github.com/danshi777/IRCAN) (Shi et al., NeurIPS 2024) baseline for comparison. This repository is a derivative of BERGEN and is released under the same CC BY-NC-SA 4.0 license (see [License](#license)).
+SCoNE improves robustness to retrieval noise in RAG by identifying and reweighting selectively context-aware neurons, without fine-tuning or additional inference-time modules.
 
-## SCoNE Quick Start
+Built on [BERGEN](https://github.com/naver/bergen) — this repository is a derivative of
+BERGEN and is released under the same CC BY-NC-SA 4.0 license. It also includes an
+[IRCAN](https://github.com/danshi777/IRCAN) (Shi et al., NeurIPS 2024) baseline, plus CAD,
+RankCoT, Ret-Robust and PA-RAG generator configs, so every method runs through one pipeline.
+
+The core implementation is in [`models/generators/neuron_strategies.py`](models/generators/neuron_strategies.py)
+(neuron mining, scoring and reweighting), wired into the generation path in
+[`models/generators/generator.py`](models/generators/generator.py) and
+[`models/generators/llm.py`](models/generators/llm.py).
+
+SCoNE modifies BERGEN's generation and retrieval pipeline and adds new modules; the
+original BERGEN README is preserved at [documentation/BERGEN_README.md](documentation/BERGEN_README.md).
+
+## Installation
+```bash
+conda create -n scone python=3.10
+conda activate scone
+pip install -r SCoNE-requirements.txt
+```
+
+
+## Quick Start
+
+The following command mines selectively context-aware neurons from 100 HotpotQA training samples and
+evaluates SCoNE using the selected neurons. In this configuration, SCoNE selects the top-5 neurons
+using local candidate pools of 50 neurons for attribution strength and cross-input variability, and
+applies an enhancement strength of $\alpha=7$.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python bergen.py \
-    generator=qwen-25-7b-instruct \
+    generator=llama-3-8b-instruct \
     dataset=kilt_hotpotqa \
     retriever=splade-v3 \
     generator.init_args.use_attr=true \
@@ -19,116 +43,140 @@ CUDA_VISIBLE_DEVICES=0 python bergen.py \
     experiment_mode=scone \
     enhance_strength=7.0 \
     save_result=true \
-    top_k=15
+    top_k=5 \
+    top_n=50
 ```
 
-- `experiment_mode=ircan` runs the IRCAN baseline; `experiment_mode=scone` runs SCoNE (ours). Ablations are available as `scone_attronly`, `scone_varonly`, `scone_var`, `scone_std`, `scone_mad`, `scone_w1`/`w2`/`w5`/`w10`.
-- `generator.init_args.use_attr=true` + `attr_ds_name=<name>` selects which HuggingFace dataset (see `DS_NAME_MAP` in `models/generators/generator.py`) is used to mine context-aware neurons; `num_attr_samples` controls how many samples are used.
-- Baseline generator configs for CAD, RankCoT, Ret-Robust and PA-RAG are also included under `config/generator/` for comparison.
+* `experiment_mode=scone`: runs SCoNE using both attribution strength and cross-input variability.
+* `num_attr_samples=100`: sets the number of HotpotQA training samples used for neuron mining.
+* `top_n=50`: sets the size of each local candidate pool before intersection.
+* `top_k=5`: sets the final number of selected neurons.
+* `enhance_strength=7.0`: sets the neuron enhancement strength $\alpha$.
 
----
+The repository defaults in `config/rag.yaml` are `top_k=50`, `top_n=50` and `enhance_strength=5.0`,
+so the values above must be passed explicitly to reproduce the reported setting.
 
-# BERGEN: A Benchmarking Library for Retrieval-Augmented Generation
- 
-[![arXiv](https://img.shields.io/badge/arXiv-2407.01102-b31b1b.svg)](https://arxiv.org/abs/2407.01102)
-[![arXiv](https://img.shields.io/badge/arXiv-2407.01463-b31b1b.svg)](https://arxiv.org/abs/2407.01463)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+## Ablation Studies
 
-BERGEN (BEnchmarking Retrieval-augmented GENeration) is a library designed to benchmark RAG systems with a focus on question-answering (QA). It addresses the challenge of inconsistent benchmarking in comparing approaches and understanding the impact of each component in a RAG pipeline.
+The main ablations can be reproduced by changing `experiment_mode` or the corresponding
+hyperparameter while keeping the remaining settings identical.
 
-## Key Features
-
-- Easy reproducibility and integration of new datasets and models
-- Support for various retrievers (20+), rerankers(4) and large language models (20+)
-- Flexible configuration system using YAML files
-- Comprehensive evaluation metrics (*Match, EM, LLMEval*, ... )
-- Support for multilingual experiments
-
-![](documentation/images/teaser_bergen.jpg) 
-
-For more information and experimental findings, please see:
-- The initial BERGEN paper: https://arxiv.org/abs/2407.01102 and our [EMNLP'24 slides](documentation/BERGEN.pdf)
-- The Multilingual RAG paper: https://arxiv.org/abs/2407.01463
-
-## Quick Start
-
-A typical RAG setup follows this pipeline:
-
-`question` >> `retriever` >> `reranker` >> `LLM` >> `answer`
-
-You can configure each component using simple YAML files. Here's an example of running an experiment:
+### Neuron Selection Criteria
 
 ```bash
-python3 bergen.py retriever="bm25" reranker="minilm6" generator='tinyllama-chat' dataset='kilt_nq'
+# Attribution only
+experiment_mode=scone_attronly
+
+# Cross-input variability only
+experiment_mode=scone_varonly
+
+# Full SCoNE
+experiment_mode=scone
 ```
 
-## Installation
+### Variability Measures
 
-Check the [installation guide](documentation/INSTALL.md) for detailed instructions.
+```bash
+# Running residual (SCoNE)
+experiment_mode=scone
 
+# Variance
+experiment_mode=scone_var
 
-## Usage
+# Standard deviation
+experiment_mode=scone_std
 
-```
-# simple setup for benchmarking
-# run the retriever and cache results
-# do the generation with VLLM
-for dataset in kilt_nq kilt_hotpotqa kilt_triviaqa asqa popqa ; do
-   
-   python3 bergen.py  retriever=splade-v3 reranker=debertav3  dataset=$dataset
-    
-   python3 bergen.py  retriever=splade-v3 reranker=debertav3 dataset=$dataset  generator=vllm_SOLAR-107B
-done
+# Mean absolute deviation (MAD)
+experiment_mode=scone_mad
 ```
 
+### Hyperparameters
 
-To fully configure BERGEN, please read our [configuration guide](documentation/config.md)
+The hyperparameter analyses can be reproduced by varying the corresponding arguments:
+
+```bash
+# Number of selected neurons
+top_k=5
+top_k=15
+
+# Local candidate pool size
+top_n=20
+top_n=50
+top_n=80
+
+# Enhancement strength
+enhance_strength=3.0
+enhance_strength=5.0
+enhance_strength=7.0
+```
+
+For the context-window ablation, use:
+
+```bash
+experiment_mode=scone_w1
+experiment_mode=scone_w2
+experiment_mode=scone
+experiment_mode=scone_w5
+experiment_mode=scone_w10
+```
+
+`experiment_mode=scone` is the window-3 setting, so it serves as the mid-point of this sweep.
+All other experimental settings should be kept identical to the main configuration.
+
+## Baselines
+
+All baselines run through the same pipeline as SCoNE, so only the differing argument is shown.
+
+```bash
+# IRCAN (Shi et al., NeurIPS 2024) - attribution-only neuron selection
+experiment_mode=ircan
+
+# Context-aware decoding (CAD)
+generator.init_args.use_cad=true
+```
+
+Fine-tuned baselines are swapped in through `generator=`:
+
+```bash
+generator=rankcot            # MignonMiyoung/RankCoT
+generator=retrobust          # Ori/llama-2-13b-peft-nq-retrobust
+generator=pa-rag             # wuqiong1/PA-RAG_Meta-Llama-3-8B-Instruct
+```
+
+`retrobust-qwen`, `retrobust-qwen-mix`, `retrobust-llama3` and `pa-rag-qwen` are also available
+under `config/generator/`.
+
+## Selectivity Analysis
+```bash
+python scripts/selectivity_probe.py --n 1000
+python scripts/selectivity_table.py --data selectivity_results/actdata_signed_n1000.json
+```
+
+## Controlled-noise Experiment
+```bash
+# Vanilla RAG
+bash scripts/run_distractor_noise.sh base '[]'
+
+# SCoNE with the fixed neurons used across all noise conditions
+bash scripts/run_distractor_noise.sh scone '[[27,8140],[13,2158],[21,12666],[30,3382],[30,5035]]'
+
+python scripts/collect_noise_results.py --dir results/noise
+```
 
 ## Evaluation
 
-Run the evaluation script to calculate LLMEval metrics and print the results:
+Each run writes to `experiments/<run_id>/`, where `eval_dev_metrics.json` holds the metric.
 
 ```bash
-python3 evaluate.py --experiments_folder experiments/ --llm_batch_size 16 --split 'dev' --llm vllm_SOLAR-107B
-
-#parse all the experiments files into a panda dataframe
-python print_results.py --folder experiments/ --format=tiny
+cat experiments/<run_id>/eval_dev_metrics.json
 ```
-
-Bergen also offers the possiblity to run pairwise comparisons using an LLM as judge. For more evaluation options and details, refer to the [Evaluation section](documentation/evaluations.md) in the complete documentation.
-
-## RAG Baselines
-Bergen provides results for several models and many datasets aiming to **provide strong baselines**. On the important datasets for RAG, the match metric is given by this table (see more in our paper): 
-### Match Metric
- Model | ASQA | NQ | TriviaQA | POPQA | HotPotQA|
-:----------:|:----------:|:----------:|:----------:|:----------:|:----------:
-Llama-2-7B  | 68.4 | 61.6 | 87.9 | 60.2 |  45.9|
-Llama-2-70B | 73.2 | 65.8 | 92.3 | 65.5  | 53.6|
-Mistral-8x7B| 73.5 | 67.1 | 91.8 | 67.9 |  54.5|
-Solar-10.7B   | 76.2 | 70.2 | 92.8 | 71.2 |  53.9|
-
-
-## Multilingual Experiments
-
-Refer to our [multilingual RAG guide](documentation/multilingual.md) for running experiments with multilingual user queries and/or multilingual Wikipedia as a datastore.
-
-
-## Training
-
-To train a model, add a training config:
-
-```bash
-python3 bergen.py retriever="bm25" reranker="minilm6" generator='tinyllama-chat' dataset='kilt_nq' train='lora'
-```
-
-## Extensions
-
-To add new datasets and models, or configure prompts, see our [reference guide](/extensions.md).
-
 
 ## Cite
 
-If you use SCoNE, please cite our paper (citation coming soon). This repository builds on BERGEN and includes the IRCAN baseline — if you use those, please also cite:
+If you use SCoNE, please cite our paper (citation coming soon).
+
+<details>
+<summary>This repository builds on BERGEN and includes the IRCAN baseline — please also cite them</summary>
 
 ```bibtex
 @inproceedings{shi2024ircan,
@@ -140,29 +188,20 @@ If you use SCoNE, please cite our paper (citation coming soon). This repository 
 }
 
 @misc{rau2024bergenbenchmarkinglibraryretrievalaugmented,
-      title={BERGEN: A Benchmarking Library for Retrieval-Augmented Generation}, 
+      title={BERGEN: A Benchmarking Library for Retrieval-Augmented Generation},
       author={David Rau and Hervé Déjean and Nadezhda Chirkova and Thibault Formal and
       Shuai Wang and Vassilina Nikoulina and Stéphane Clinchant},
       year={2024},
       eprint={2407.01102},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2407.01102}, 
-}
-
-@misc{chirkova2024retrievalaugmentedgenerationmultilingualsettings,
-      title={Retrieval-augmented generation in multilingual settings}, 
-      author={Nadezhda Chirkova and David Rau and Hervé Déjean and Thibault Formal and Stéphane Clinchant and Vassilina Nikoulina},
-      year={2024},
-      eprint={2407.01463},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2407.01463}, 
+      url={https://arxiv.org/abs/2407.01102},
 }
 ```
+</details>
 
 ## License
 
-This repository is a derivative of [NAVER's BERGEN](https://github.com/naver/bergen), released under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 license, and SCoNE's additions are released under the same license. For more details, see the [LICENCE.md](LICENCE.md) and [NOTICE.md](NOTICE.md) files.
-
----
+Derivative of [NAVER's BERGEN](https://github.com/naver/bergen), released under
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/); SCoNE's additions are
+released under the same license. See [LICENCE.md](LICENCE.md) and [NOTICE.md](NOTICE.md).
