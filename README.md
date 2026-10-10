@@ -3,8 +3,6 @@
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
 ## Overview
-[alg.pdf](https://github.com/user-attachments/files/33278522/alg.pdf)
-
 SCoNE improves robustness to retrieval noise in RAG by identifying and reweighting selectively context-aware neurons, without fine-tuning or additional inference-time modules.
 
 Built on [BERGEN](https://github.com/naver/bergen) — this repository is a derivative of
